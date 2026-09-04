@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+
+# Sample raw data IS intentionally tracked so the repo shows real data on
+# GitHub -- do not add data/raw/ here.

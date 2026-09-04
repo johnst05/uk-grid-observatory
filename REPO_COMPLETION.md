@@ -22,7 +22,7 @@ this repo; the phase breakdown below is that brief's build routine.
 |---|---|---|
 | 0 | Foundation: README, deps, docker-compose, .env.example, sql/raw + sql/staging, ingestion scripts, real sample data in `data/raw/` | **Done** |
 | 1 | Postgres running, raw layer loaded from `data/raw/` CSVs | **Done** |
-| 2 | Raw -> staging transform (dedupe, type, pivot) | Not started |
+| 2 | Raw -> staging transform (dedupe, type, pivot) | **Done** |
 | 3 | Clean/mart layer: `clean.forecast_vs_outturn` with window functions (divergence, rolling avg, rank, day-over-day delta) | Not started |
 | 4 | Power BI dashboard (`.pbix`) | Not started -- **cannot be built inside a headless Linux sandbox**; needs Power BI Desktop on Windows/macOS. This session can export the clean-layer data and write exact build steps, but not produce the `.pbix` itself. |
 | 5 | Scheduled refresh (cron/Action) -- important specifically because WINDFOR has no historical archive and must be snapshotted repeatedly to accumulate real forecast history | Not started |
@@ -34,15 +34,15 @@ The repo now has a real, working ingestion layer against two live public
 APIs (Elexon BMRS, NESO CKAN) with genuine sample data committed, SQL
 schemas for the raw and staging layers, and that raw layer is loaded into
 a running Postgres instance with verified row counts and a source_payload
-spot-check. What's still missing to match the full brief: no
-transform/clean layer yet, no window-function analysis, no dashboard, and
+spot-check, and staging has been built on top of it with real dedup
+(NESO demand forecast: 1,030 raw rows -> 986 distinct keys, confirmed no
+duplicate primary keys). What's still missing to match the full brief:
+no clean/mart layer yet, no window-function analysis, no dashboard, and
 no scheduled refresh.
 
 ## Prioritized list for future sessions
 
-1. **Phase 2** -- raw -> staging transforms per source, deduped to latest
-   `publish_time` per key.
-2. **Phase 3** -- `sql/clean/001_create_clean_tables.sql` with the window
+1. **Phase 3** -- `sql/clean/001_create_clean_tables.sql` with the window
    functions described in the brief (divergence, 7/30-day rolling avg,
    `RANK()` on worst misses, `LAG()` day-over-day delta).
 3. **Phase 4** -- export clean-layer data for Power BI and document the

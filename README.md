@@ -65,7 +65,21 @@ Then pull fresh data (optional -- `data/raw/` already has a 90-day sample):
 ```bash
 python3 ingestion/elexon_ingest.py --days 90
 python3 ingestion/neso_ingest.py --days 90
+python3 ingestion/load_raw.py
+python3 ingestion/transform_staging.py
 ```
+
+Then keep it current with a daily scheduled refresh (see
+[`docs/refresh_schedule.md`](docs/refresh_schedule.md) for cron / GitHub
+Actions / Task Scheduler options):
+
+```bash
+python3 ingestion/refresh.py
+```
+
+This matters more than it sounds: WINDFOR has no historical archive (see
+Gotchas below), so real forecast-vs-outturn history only exists for
+whatever days this has actually been run on.
 
 ## Gotchas discovered while building this
 

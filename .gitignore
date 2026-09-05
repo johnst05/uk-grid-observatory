@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 *.log
+logs/
 
 # Sample raw data IS intentionally tracked so the repo shows real data on
 # GitHub -- do not add data/raw/ here.

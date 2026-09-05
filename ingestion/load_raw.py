@@ -37,15 +37,56 @@ def _row_to_payload(row: dict) -> str:
     return json.dumps({k: _clean(v) for k, v in row.items()})
 
 
-def _load_csvs(pattern: str) -> pd.DataFrame:
-    paths = sorted(DATA_RAW_DIR.glob(pattern))
+def ensure_loaded_files_table(conn):
+    """A small ledger of which source CSVs have already been loaded, so
+    re-running this script (as the Phase 5 scheduled refresh does, daily)
+    doesn't re-insert the same file's rows as duplicates. Raw itself has
+    no unique constraint to catch that -- it's intentionally append-only
+    and doesn't know what a "duplicate" fact looks like across sources."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS raw._loaded_files (
+                   filename TEXT PRIMARY KEY,
+                   loaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+               )"""
+        )
+    conn.commit()
+
+
+def _already_loaded(conn, filenames: list[str]) -> set[str]:
+    if not filenames:
+        return set()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT filename FROM raw._loaded_files WHERE filename = ANY(%s)",
+            (filenames,),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
+def _mark_loaded(conn, filenames: list[str]):
+    if not filenames:
+        return
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_values(
+            cur,
+            "INSERT INTO raw._loaded_files (filename) VALUES %s ON CONFLICT DO NOTHING",
+            [(f,) for f in filenames],
+        )
+
+
+def _load_csvs(conn, pattern: str) -> tuple[pd.DataFrame, list[str]]:
+    all_paths = sorted(DATA_RAW_DIR.glob(pattern))
+    already = _already_loaded(conn, [p.name for p in all_paths])
+    paths = [p for p in all_paths if p.name not in already]
     if not paths:
-        print(f"  (no files matching {pattern}, skipping)")
-        return pd.DataFrame()
+        print(f"  (no new files matching {pattern} -- "
+              f"{len(all_paths)} already loaded, skipping)")
+        return pd.DataFrame(), []
     frames = [pd.read_csv(p) for p in paths]
-    print(f"  loading {len(paths)} file(s) matching {pattern}: "
+    print(f"  loading {len(paths)} new file(s) matching {pattern}: "
           f"{', '.join(p.name for p in paths)}")
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat(frames, ignore_index=True), [p.name for p in paths]
 
 
 def get_connection():
@@ -59,7 +100,7 @@ def get_connection():
 
 
 def load_fuelhh(conn):
-    df = _load_csvs("elexon_fuelhh_*.csv")
+    df, filenames = _load_csvs(conn, "elexon_fuelhh_*.csv")
     if df.empty:
         return 0
     rows = [
@@ -78,12 +119,13 @@ def load_fuelhh(conn):
                VALUES %s""",
             rows,
         )
+    _mark_loaded(conn, filenames)
     conn.commit()
     return len(rows)
 
 
 def load_demand_outturn(conn):
-    df = _load_csvs("elexon_demand_outturn_*.csv")
+    df, filenames = _load_csvs(conn, "elexon_demand_outturn_*.csv")
     if df.empty:
         return 0
     rows = [
@@ -103,12 +145,13 @@ def load_demand_outturn(conn):
                VALUES %s""",
             rows,
         )
+    _mark_loaded(conn, filenames)
     conn.commit()
     return len(rows)
 
 
 def load_windfor(conn):
-    df = _load_csvs("elexon_windfor_snapshot_*.csv")
+    df, filenames = _load_csvs(conn, "elexon_windfor_snapshot_*.csv")
     if df.empty:
         return 0
     rows = [
@@ -123,12 +166,13 @@ def load_windfor(conn):
                VALUES %s""",
             rows,
         )
+    _mark_loaded(conn, filenames)
     conn.commit()
     return len(rows)
 
 
 def load_neso_generation_mix(conn):
-    df = _load_csvs("neso_generation_mix_*.csv")
+    df, filenames = _load_csvs(conn, "neso_generation_mix_*.csv")
     if df.empty:
         return 0
     rows = [
@@ -150,12 +194,13 @@ def load_neso_generation_mix(conn):
                VALUES %s""",
             rows,
         )
+    _mark_loaded(conn, filenames)
     conn.commit()
     return len(rows)
 
 
 def load_neso_demand_forecast(conn):
-    df = _load_csvs("neso_demand_forecast_*.csv")
+    df, filenames = _load_csvs(conn, "neso_demand_forecast_*.csv")
     if df.empty:
         return 0
     rows = [
@@ -175,6 +220,7 @@ def load_neso_demand_forecast(conn):
                VALUES %s""",
             rows,
         )
+    _mark_loaded(conn, filenames)
     conn.commit()
     return len(rows)
 
@@ -197,6 +243,7 @@ def main():
     targets = args.only or list(LOADERS)
     conn = get_connection()
     try:
+        ensure_loaded_files_table(conn)
         for name in targets:
             print(f"Loading raw.{name} ...")
             count = LOADERS[name](conn)

@@ -1,6 +1,6 @@
 # Repo Completion Assessment
 
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-05 (automated re-check, no code changes this pass)
 
 ## What this repo is
 
@@ -33,6 +33,35 @@ The two things genuinely outstanding are not "unfinished work" so much as
 "work that needs a different environment or real elapsed time," detailed
 below.
 
+## Test coverage
+
+**No test suite exists anywhere in the repo.** There is no `tests/`
+directory, no `pytest` (or other test runner) in `requirements.txt`, and
+no CI step that runs tests. A grep for `TODO`, `FIXME`, `XXX`,
+`NotImplementedError`, and stray `pass` placeholders across `ingestion/`,
+`sql/`, and the docs turned up nothing -- the code that exists has no
+unfinished stubs -- but "no stubs" is not the same as "tested." The
+riskiest untested logic is:
+
+- `ingestion/load_raw.py` -- the idempotency fix from Phase 5 (dedup on
+  reload) has no regression test guarding it from regressing again.
+- `ingestion/transform_staging.py` -- dedup and grain-reconciliation logic
+  (one row per date/period/fuel type/source) is exactly the kind of
+  off-by-one-prone code that benefits from fixture-based unit tests.
+- `sql/clean/001_create_clean_tables.sql` -- the window-function
+  divergence/rolling-average/rank logic has no test fixtures to confirm
+  the numbers are computed correctly on known input, only manual spot
+  checks noted in `docs/build-log/`.
+- `ingestion/common.py`, `elexon_ingest.py`, `neso_ingest.py` -- API
+  pagination, rate-limiting, and the date-range chunking that works
+  around the Elexon/NESO quirks documented in the README have no tests
+  exercising them against mocked responses.
+
+Building a test suite (e.g. `pytest` + fixture CSVs/JSONB samples for the
+raw->staging->clean transforms, and mocked HTTP responses for the
+ingestion scripts) is genuine outstanding work and is listed as its own
+item below.
+
 ## Gap summary
 
 The full raw -> staging -> clean pipeline runs end-to-end against real
@@ -55,9 +84,19 @@ Power BI Desktop on a machine this sandbox can't provide.
    Postgres it can reach). This is the single highest-leverage remaining
    step: every day it isn't running is a day of WINDFOR forecast history
    that can never be recovered afterward.
-2. **Build the actual `.pbix`** on a machine with Power BI Desktop
+2. **Build a test suite** -- none exists today. At minimum: unit tests
+   for the staging dedup/grain-reconciliation logic in
+   `transform_staging.py` (fixture rows in, expected one-row-per-grain
+   out), a regression test for the `load_raw.py` idempotency fix (load
+   twice, assert no duplicate rows), and mocked-HTTP tests for the
+   Elexon/NESO date-chunking and pagination quirks in `elexon_ingest.py`
+   / `neso_ingest.py`. A few SQL fixture tests against
+   `clean.forecast_vs_outturn` (known input rows -> known divergence/
+   rolling-average/rank output) would also catch a broken window-function
+   query before it silently produces wrong numbers.
+3. **Build the actual `.pbix`** on a machine with Power BI Desktop
    installed, following `dashboard/README.md`'s click-by-click steps.
-3. **Revisit the README's Results section periodically** as the scheduled
+4. **Revisit the README's Results section periodically** as the scheduled
    refresh accumulates real WINDFOR history -- re-run the forecast-vs-
    outturn query, update the sample size and the numbers, and only then
    consider the kind of general claim the original brief envisioned

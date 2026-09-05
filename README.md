@@ -14,17 +14,26 @@ divergence with SQL window functions, and visualizes the result.
 
 ## Status
 
-Under active build. See [`REPO_COMPLETION.md`](REPO_COMPLETION.md) for the
-phase-by-phase plan and current progress, and
-[`docs/build-log/`](docs/build-log/) for a detailed, dated log of decisions
+The pipeline runs end-to-end against real data: ingestion, raw, staging,
+clean (window functions), and a scheduled refresh are all built and
+verified. The dashboard (Power BI) has data exported and exact build
+steps written, but the `.pbix` itself needs Power BI Desktop, which
+can't run in the Linux environment this was built in. See
+[`REPO_COMPLETION.md`](REPO_COMPLETION.md) for the phase-by-phase detail
+and [`docs/build-log/`](docs/build-log/) for a dated log of decisions
 made and gotchas discovered along the way.
 
 ## Architecture
 
-```
-Elexon BMRS API ───┐                 ┌──> staging ──> clean (window fns) ──> Power BI
-                    ├──> raw (JSONB) ─┤
-NESO CKAN API ──────┘                 └──> staging ──┘
+```mermaid
+flowchart LR
+    A[Elexon BMRS API] -->|FUELHH, WINDFOR, demand outturn| C[(raw · JSONB)]
+    B[NESO CKAN API] -->|generation mix, demand forecast| C
+    C -->|dedup, type, pivot| D[(staging)]
+    D -->|window functions| E[(clean ·\nforecast_vs_outturn)]
+    E --> F[Power BI]
+    G[Scheduled refresh] -.daily.-> A
+    G -.daily.-> B
 ```
 
 - **raw** -- exactly what each API returned, one row per record, full
@@ -108,14 +117,44 @@ whatever days this has actually been run on.
 Full detail on how each of these was found is in
 [`docs/build-log/`](docs/build-log/).
 
+## Results so far
+
+Two different things were measured, with very different sample sizes --
+worth being explicit about which is which rather than blending them into
+one confident-sounding headline.
+
+**Elexon vs NESO wind outturn agreement (real, n = 4,320 half-hour
+periods over 90 days):** the two independent measurements of actual wind
+generation agree closely -- correlation **0.985**, mean absolute
+difference **380.5 MW** (against wind generation typically in the
+5,000–15,000 MW range over this window). This is a solid result: two
+separately-operated data pipelines measuring the same physical thing land
+within a few percent of each other almost all the time.
+
+**WINDFOR forecast vs outturn divergence (preliminary, n = 6 half-hour
+periods on one evening):** WINDFOR over-forecast wind generation by a
+mean of **2,746 MW** (about **22% of the forecast value**) across the
+only 6 settlement periods where a forecast and its matching outturn both
+currently exist. **This is not enough data to generalize from** -- see
+`docs/build-log/phase-3-clean-layer.md` for exactly why (WINDFOR has no
+historical archive; real forecast history only accumulates via the
+scheduled refresh running over actual elapsed days/weeks). Treat this
+number as "the pipeline works and produced a real, correctly-computed
+result," not as "wind forecasts are off by 22% in general" -- that claim
+needs the scheduled refresh to run for a meaningful stretch of real time
+before it can honestly be made. This README will be updated with that
+number once there's enough history to support it.
+
 ## Repository layout
 
 ```
-ingestion/          Python scripts that pull from the APIs and write CSVs to data/raw/
-sql/raw/            Raw-layer schema migrations
-sql/staging/        Staging-layer schema migrations
-sql/clean/          Clean/mart-layer schema + window-function views (Phase 3)
-data/raw/           Sample data already pulled from the live APIs
-dashboard/          Power BI file / exports (Phase 4)
-docs/               Refresh-schedule docs and the build log
+ingestion/              Ingestion, loading, transform, and scheduled-refresh scripts
+sql/raw/                Raw-layer schema migrations
+sql/staging/            Staging-layer schema migrations
+sql/clean/              Clean/mart-layer schema + window-function views (Phase 3)
+data/raw/               Sample data already pulled from the live APIs
+dashboard/              Power BI build guide + data exports (Phase 4)
+docs/refresh_schedule.md  How and why the scheduled refresh runs
+docs/build-log/         Dated, per-phase notes on decisions and gotchas
+.github/workflows/      Optional GitHub Action for the scheduled refresh
 ```
